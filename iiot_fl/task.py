@@ -9,25 +9,28 @@ from iiot_fl.model import IIoTFLNet, DualTaskLoss
 
 logger = logging.getLogger(__name__)
 
+
 def get_parameters(model: nn.Module) -> list:
     return [val.cpu().numpy() for val in model.state_dict().values()]
+
 
 def set_parameters(model: nn.Module, parameters: list):
     from collections import OrderedDict
 
     state_dict = OrderedDict(
-        {k: torch.tensor(v) for k, v in zip(model.state_dict().keys, parameters)}
+        {k: torch.tensor(v) for k, v in zip(model.state_dict().keys(), parameters)}
     )
     model.load_state_dict(state_dict, strict=True)
 
+
 def train(
-        model:          IIoTFLNet,
-        train_loader:   DataLoader,
-        criterion:      DualTaskLoss,
-        optimizer:      torch.optim.Optimizer,
-        scheduler:      torch.optim.lr_scheduler._LRScheduler | None,
-        device:         torch.device,
-        local_epochs:   int,
+    model: IIoTFLNet,
+    train_loader: DataLoader,
+    criterion: DualTaskLoss,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler._LRScheduler | None,
+    device: torch.device,
+    local_epochs: int,
 ) -> Dict[str, float]:
     model.train()
     final_metrics = {}
@@ -46,7 +49,9 @@ def train(
             optimizer.zero_grad()
             rul_pred, fail_logit = model(x)
 
-            loss, rul_loss, fail_loss = criterion(rul_pred, rul_true, fail_logit, fail_true)
+            loss, rul_loss, fail_loss = criterion(
+                rul_pred, rul_true, fail_logit, fail_true
+            )
             loss.backward()
 
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -62,31 +67,33 @@ def train(
             scheduler.step()
 
         final_metrics = {
-            "avg_loss":         total_loss / n,
-            "avg_rul_loss":     total_rul / n,
-            "avg_fail_loss":    total_fail / n,
+            "avg_loss": total_loss / n,
+            "avg_rul_loss": total_rul / n,
+            "avg_fail_loss": total_fail / n,
         }
         logger.info(
             "  Epoch %d/%d | loss=%.4f | rul=%.4f | fail=%.4f",
-            epoch + 1, local_epochs,
+            epoch + 1,
+            local_epochs,
             final_metrics["avg_loss"],
             final_metrics["avg_rul_loss"],
-            final_metrics["avg_fail_loss"]
+            final_metrics["avg_fail_loss"],
         )
 
     return final_metrics
 
+
 def evaluate(
-        model:      IIoTFLNet,
-        val_loader: DataLoader,
-        criterion:  DualTaskLoss,
-        device:     torch.device,
+    model: IIoTFLNet,
+    val_loader: DataLoader,
+    criterion: DualTaskLoss,
+    device: torch.device,
 ) -> Tuple[float, int, Dict[str, float]]:
     model.eval()
 
     total_loss = 0.0
     rul_mae = 0.0
-    tp, fp, fn, tn = 0
+    tp, fp, fn, tn = 0, 0, 0, 0
     n = 0
 
     with torch.no_grad():
@@ -113,14 +120,14 @@ def evaluate(
     f1 = 2 * precision * recall / max(precision + recall, 1e-8)
 
     metrics = {
-        "rul_mae":          rul_mae / n,
-        "fail_accuracy":    (tp + tn) / n,
-        "fail_f1":          f1,
-        "fail_precision":   precision,
-        "fail_recall":      recall,
+        "rul_mae": rul_mae / n,
+        "fail_accuracy": (tp + tn) / n,
+        "fail_f1": f1,
+        "fail_precision": precision,
+        "fail_recall": recall,
     }
 
-    logger.inf(
+    logger.info(
         "  Eval | loss=%.4f | rul_mae=%.4f | fail_acc=%.4f | faill_f1=%.4f",
         total_loss / n,
         metrics["rul_mae"],

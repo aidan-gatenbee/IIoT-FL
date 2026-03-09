@@ -1,11 +1,7 @@
 import logging
 from typing import List, Tuple
 
-from flwr.common import (
-    Context,
-    Metrics,
-    ndarrays_to_parameters
-)
+from flwr.common import Context, Metrics, ndarrays_to_parameters
 from flwr.server import ServerApp, ServerAppComponents, ServerConfig
 from flwr.server.strategy import FedAdam, FedAvg
 
@@ -16,18 +12,19 @@ from iiot_fl.task import get_parameters
 
 logger = logging.getLogger(__name__)
 
+
 def weighted_average(metrics: List[Tuple[int, Metrics]]) -> Metrics:
     if not metrics:
         return {}
-    
+
     total_samples = sum(n for n, _ in metrics)
     aggregated = {}
     keys = list(metrics[0][1].keys())
 
     for key in keys:
-        aggregated[key] = sum(
-            n * m[key] for n, m in metrics if key in m
-        ) / total_samples
+        aggregated[key] = (
+            sum(n * m[key] for n, m in metrics if key in m) / total_samples
+        )
 
     logger.info(
         "Round aggregated metrics | loss=%.4f | rul_mae=%.4f | f1=%.4f",
@@ -38,18 +35,22 @@ def weighted_average(metrics: List[Tuple[int, Metrics]]) -> Metrics:
 
     return aggregated
 
+
 def fit_metrics_aggregation(metrics: List[Tuple[int, Metrics]]) -> Metrics:
     if not metrics:
         return {}
-    
+
     total_samples = sum(n for n, _ in metrics)
     aggregated = {}
     keys = list(metrics[0][1].keys())
 
     for key in keys:
-        aggregated[key] = sum(
-            n * m[key] for n, m in metrics if key in m
-        ) / total_samples
+        aggregated[key] = (
+            sum(n * m[key] for n, m in metrics if key in m) / total_samples
+        )
+
+    return aggregated
+
 
 def server_fn(context: Context) -> ServerAppComponents:
     config = context.run_config
@@ -72,12 +73,12 @@ def server_fn(context: Context) -> ServerAppComponents:
     common_kwargs = dict(
         fraction_fit=float(config["fraction-fit"]),
         fraction_evaluate=float(config["fraction-evaluate"]),
-        min_fit_clients=float(config["min-fit-clients"]),
-        min_evaluate_clients=float(config["min-evaluate-clients"]),
-        min_available_clients=float(config["min-available-clients"]),
-        init_params=init_params,
+        min_fit_clients=int(config["min-fit-clients"]),
+        min_evaluate_clients=int(config["min-evaluate-clients"]),
+        min_available_clients=int(config["min-available-clients"]),
+        initial_parameters=init_params,
         evaluate_metrics_aggregation_fn=weighted_average,
-        fit_metrics_aggregation_fn=fit_metrics_aggregation
+        fit_metrics_aggregation_fn=fit_metrics_aggregation,
     )
 
     if strategy_config["name"] == "FedAdam":
@@ -92,7 +93,7 @@ def server_fn(context: Context) -> ServerAppComponents:
 
         logger.info(
             "Strategy: FedAdam | server_lr=%.4f | tau=%.1e",
-            strategy["server_ls"],
+            strategy_config["server_lr"],
             strategy_config["tau"],
         )
 
@@ -103,5 +104,6 @@ def server_fn(context: Context) -> ServerAppComponents:
     server_config = ServerConfig(num_rounds=int(config["num-server-rounds"]))
 
     return ServerAppComponents(strategy=strategy, config=server_config)
+
 
 app = ServerApp(server_fn=server_fn)

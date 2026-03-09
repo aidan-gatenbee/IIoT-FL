@@ -8,16 +8,18 @@ import torch.nn as nn
 
 logger = logging.getLogger(__name__)
 
+
 class FeatureTokenizer(nn.Module):
     def __init__(self, n_features: int, d_token: int):
         super().__init__()
         self.weight = nn.Parameter(torch.empty(n_features, d_token))
         self.bias = nn.Parameter(torch.zeros(n_features, d_token))
-        nn.init.kaiming_uniform(self.weight, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x[:, :, None] * self.weight[None] + self.bias[None]
-    
+
+
 class FTTransformerBackbone(nn.Module):
     def __init__(self, config: dict):
         super().__init__()
@@ -36,7 +38,7 @@ class FTTransformerBackbone(nn.Module):
         self.encoder_layer = nn.TransformerEncoderLayer(
             d_model=d,
             nhead=config["attention_heads"],
-            dim_feedforward=d * config["ffn_dim_multiplier"],
+            dim_feedforward=int(d * config["ffn_dim_multiplier"]),
             dropout=config["dropout"],
             activation="gelu",
             batch_first=True,
@@ -52,9 +54,13 @@ class FTTransformerBackbone(nn.Module):
         self.norm = nn.LayerNorm(d)
 
         logger.info(
-            "FTTransformerBackbone | features=%d | seq_len=%d | d_token=%d | heads=%d | params=%s",
-            n_features, seq_len, d, config["n_blocks"], config["attention_heads"],
-            f"{sum(p.numel() for p in self.parameters()):,}"
+            "FTTransformerBackbone | features=%d | seq_len=%d | d_token=%d | blocks=%d | heads=%d | params=%s",
+            n_features,
+            seq_len,
+            d,
+            config["n_blocks"],
+            config["attention_heads"],
+            f"{sum(p.numel() for p in self.parameters()):,}",
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -71,6 +77,7 @@ class FTTransformerBackbone(nn.Module):
         cls_repr = self.norm(out[:, 0, :])
         return cls_repr
 
+
 class IIoTFLNet(nn.Module):
     def __init__(self, config: dict):
         super().__init__()
@@ -84,7 +91,7 @@ class IIoTFLNet(nn.Module):
             nn.GELU(),
             nn.Dropout(config["dropout"]),
             nn.Linear(d // 2, 1),
-            nn.Softplus()
+            nn.Softplus(),
         )
 
         # Failure head, activation applied on BCEWithLogitsLoss
@@ -92,7 +99,7 @@ class IIoTFLNet(nn.Module):
             nn.Linear(d, d // 2),
             nn.GELU(),
             nn.Dropout(config["dropout"]),
-            nn.Linear(d // 2, 1)
+            nn.Linear(d // 2, 1),
         )
 
         total = sum(p.numel() for p in self.parameters())
@@ -109,15 +116,16 @@ class IIoTFLNet(nn.Module):
         rul_pred = self.rul_head(x)
         failure_logit = self.failure_head(x)
         return rul_pred, failure_logit
-    
+
+
 class DualTaskLoss(nn.Module):
     def __init__(
-            self,
-            rul_weight:     float = 1.0,
-            fail_weight:    float = 2.0,
-            pos_weight:     torch.Tensor | None = None
+        self,
+        rul_weight: float = 1.0,
+        fail_weight: float = 2.0,
+        pos_weight: torch.Tensor | None = None,
     ):
-        super().__init()
+        super().__init__()
         self.rul_weight = rul_weight
         self.fail_weight = fail_weight
         self.mse = nn.MSELoss()
@@ -127,20 +135,17 @@ class DualTaskLoss(nn.Module):
         self.bce = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
     def forward(
-            self,
-            rul_pred:       torch.Tensor,
-            rul_true:       torch.Tensor,
-            failure_logit:  torch.Tensor,
-            failure_true:   torch.Tensor,
+        self,
+        rul_pred: torch.Tensor,
+        rul_true: torch.Tensor,
+        failure_logit: torch.Tensor,
+        failure_true: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         rul_loss = self.mse(
             torch.log1p(rul_pred.squeeze()),
             torch.log1p(rul_true),
         )
-        failure_loss = self.bce(
-            failure_logit.squeeze,
-            failure_true
-        )
+        failure_loss = self.bce(failure_logit.squeeze(), failure_true)
 
         total = self.rul_weight * rul_loss + self.fail_weight * failure_loss
         return total, rul_loss.detach(), failure_loss.detach()
